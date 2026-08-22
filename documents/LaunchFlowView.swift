@@ -870,26 +870,6 @@ private struct SignInDraftView: View {
                                 .frame(maxWidth: 360)
                         }
 
-#if DEBUG
-                        Button(action: onDeveloperMode) {
-                            Text("Developer Mode")
-                                .font(.body.weight(.semibold))
-                                .foregroundStyle(AppPalette.accent)
-                                .frame(maxWidth: .infinity)
-                                .frame(minHeight: 44)
-                                .background {
-                                    RoundedRectangle(
-                                        cornerRadius: 14,
-                                        style: .continuous
-                                    )
-                                    .fill(Color.white.opacity(0.68))
-                                }
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityHint(
-                            "Opens the app without signing in"
-                        )
-#endif
 
                         HStack(spacing: 8) {
                             Image(systemName: "lock.shield.fill")

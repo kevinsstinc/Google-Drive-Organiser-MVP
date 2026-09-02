@@ -122,6 +122,24 @@ appears to be a physics worksheet about energy
 
 then you can approve it.
 
+## ui
+<table>
+  <tr>
+    <td>
+      <img src="https://github.com/user-attachments/assets/3b275bda-db43-4a6d-8bac-962968484ef5" width="180" />
+    </td>
+    <td>
+      <img src="https://github.com/user-attachments/assets/e6c2cef4-ce72-481b-b242-f61785dc69a3" width="180" />
+    </td>
+    <td>
+      <img src="https://github.com/user-attachments/assets/085510e3-8280-4c73-a916-9a0f49e6c0e7" width="180" />
+    </td>
+    <td>
+      <img src="https://github.com/user-attachments/assets/5e9619eb-470c-47a0-8149-e4c38c752a21" width="180" />
+    </td>
+  </tr>
+</table>
+
 ## ai sorting
 
 the main thing documents does differently is that it doesn't only look at filenames.

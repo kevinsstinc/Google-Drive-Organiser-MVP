@@ -1,0 +1,10 @@
+.DS_Store
+DerivedData/
+build/
+*.xcarchive/
+*.ipa
+*.dSYM/
+xcuserdata/
+*.xcuserstate
+firebase-debug.log
+.firebase/

@@ -74,6 +74,7 @@ enum AIRequestFailure: Error, LocalizedError {
   case rateLimited(retryAt: Date)
   case dailyQuota
   case accessDenied
+  case appVerification
   case configuration
   case offline
   case temporary
@@ -90,7 +91,10 @@ enum AIRequestFailure: Error, LocalizedError {
         "The AI provider's daily quota is used up. Your progress is saved. Try again when the quota resets."
     case .accessDenied:
       return
-        "AI access was denied. Check Firebase AI Logic and App Check for this app. Your files are safe in Needs Review."
+        "AI access was denied. Check the Gemini API permissions for this Firebase project. Your files are safe in Needs Review."
+    case .appVerification:
+      return
+        "This app could not be verified by Firebase App Check. Check its App Check registration, then try again. Your progress is saved."
     case .configuration:
       return
         "AI is not configured correctly. Check the Gemini service and model in Firebase. Your files are in Needs Review."
@@ -122,32 +126,66 @@ enum AIRequestFailure: Error, LocalizedError {
         return .temporary
       }
     }
-    if details.contains("resource_exhausted") || details.contains("resourceexhausted")
-      || details.contains("429") || details.contains("quota exceeded")
-    {
-      if details.contains("perday") || details.contains("per_day") || details.contains("daily") {
-        return .dailyQuota
+    if let status = backendStatus(nsError) {
+      switch status {
+      case 429:
+        return quotaFailure(details: details, now: now)
+      case 401, 403:
+        return mentionsAppCheck(details) ? .appVerification : .accessDenied
+      case 400, 404:
+        return .configuration
+      case 500, 502, 503, 504:
+        return .temporary
+      default:
+        return .other
       }
-      let delay = retryDelay(in: details) ?? 60
-      return .rateLimited(retryAt: now.addingTimeInterval(max(1, delay)))
     }
-    if details.contains("403") || details.contains("401") || details.contains("permission_denied")
-      || details.contains("permissiondenied") || details.contains("app check")
-      || details.contains("appcheck") || details.contains("unauthenticated")
+    if details.contains("resource_exhausted") || details.contains("resourceexhausted")
+      || details.contains("quota exceeded")
+    {
+      return quotaFailure(details: details, now: now)
+    }
+    if mentionsAppCheck(details) {
+      return .appVerification
+    }
+    if details.contains("permission_denied") || details.contains("permissiondenied")
+      || details.contains("unauthenticated")
     {
       return .accessDenied
     }
-    if details.contains("404") || details.contains("400") || details.contains("not_found")
-      || details.contains("invalid_argument") || details.contains("service_disabled")
+    if details.contains("not_found") || details.contains("invalid_argument")
+      || details.contains("service_disabled")
     {
       return .configuration
     }
-    if details.contains("503") || details.contains("502") || details.contains("500")
-      || details.contains("unavailable") || details.contains("deadline_exceeded")
-    {
+    if details.contains("unavailable") || details.contains("deadline_exceeded") {
       return .temporary
     }
     return .other
+  }
+
+  static func canRefreshAppCheck(after error: Error) -> Bool {
+    let nsError = error as NSError
+    guard backendStatus(nsError) == 401 else { return false }
+    let details = nsError.localizedDescription.lowercased()
+    return mentionsAppCheck(details) && details.contains("token") && details.contains("invalid")
+  }
+
+  private static func backendStatus(_ error: NSError) -> Int? {
+    guard error.domain == "com.google.firebase.firebaseai.BackendError" else { return nil }
+    return error.code
+  }
+
+  private static func mentionsAppCheck(_ details: String) -> Bool {
+    details.filter { $0.isLetter || $0.isNumber }.contains("appcheck")
+  }
+
+  private static func quotaFailure(details: String, now: Date) -> AIRequestFailure {
+    if details.contains("perday") || details.contains("per_day") || details.contains("daily") {
+      return .dailyQuota
+    }
+    let delay = retryDelay(in: details) ?? 60
+    return .rateLimited(retryAt: now.addingTimeInterval(max(1, delay)))
   }
 
   static func retryDelay(in text: String) -> TimeInterval? {

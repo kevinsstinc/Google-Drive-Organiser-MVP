@@ -5,9 +5,11 @@
 //
 import Combine
 import FirebaseAILogic
+import FirebaseAppCheck
 import FirebaseCore
 import Foundation
 import GoogleSignIn
+import OSLog
 import PDFKit
 import SwiftUI
 import UIKit
@@ -45,6 +47,9 @@ final class DriveLibraryController: ObservableObject {
   @Published var totalToOrganize = 0
 
   @Published var statusMessage: String?
+
+  private static let logger = Logger(
+    subsystem: Bundle.main.bundleIdentifier ?? "Documents", category: "Library")
 
   private static let classifierVersion = "drive-hybrid-v2-turbo"
 
@@ -154,6 +159,13 @@ final class DriveLibraryController: ObservableObject {
     isLoadingDrive = false
     isOrganizing = false
     renderLibrary()
+    if let statusMessage {
+      Self.logger.notice("Library update: \(statusMessage, privacy: .public)")
+    } else {
+      Self.logger.info(
+        "Library ready: \(self.accountCache.files.count) files, \(self.accountCache.assignments.count) saved assignments"
+      )
+    }
     if needsFolderRefresh {
       needsFolderRefresh = false
       Task { await foldersChanged() }
@@ -870,15 +882,34 @@ final class DriveLibraryController: ObservableObject {
     let operationID = activeOperationID
     let accountID = currentAccountID
     let signature = selectedFolderSignature()
-    return try await aiRequests.perform {
-      guard let operationID, let accountID else { throw CancellationError() }
-      try self.checkOperation(operationID, accountID: accountID, folderSignature: signature)
+    for recoveryAttempt in 0..<2 {
+      var invalidAppCheckToken = false
       do {
-        return try await model.generateContent(contents)
-      } catch GenerateContentError.internalError(let underlying) {
-        throw underlying
+        return try await aiRequests.perform {
+          guard let operationID, let accountID else { throw CancellationError() }
+          try self.checkOperation(operationID, accountID: accountID, folderSignature: signature)
+          do {
+            return try await model.generateContent(contents)
+          } catch GenerateContentError.internalError(let underlying) {
+            invalidAppCheckToken = AIRequestFailure.canRefreshAppCheck(after: underlying)
+            throw underlying
+          }
+        }
+      } catch AIRequestFailure.appVerification where invalidAppCheckToken && recoveryAttempt == 0 {
+        guard let operationID, let accountID else { throw CancellationError() }
+        try checkOperation(operationID, accountID: accountID, folderSignature: signature)
+        statusMessage = "Verifying this app…"
+        do {
+          _ = try await AppCheck.appCheck().token(forcingRefresh: true)
+        } catch is CancellationError {
+          throw CancellationError()
+        } catch {
+          throw AIRequestFailure.appVerification
+        }
+        try checkOperation(operationID, accountID: accountID, folderSignature: signature)
       }
     }
+    throw AIRequestFailure.appVerification
   }
 
   private func classificationPrompt(

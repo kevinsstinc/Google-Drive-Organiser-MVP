@@ -37,7 +37,7 @@ struct AIRequestCoordinatorTests {
         _ = try await quota.perform {
           quotaAttempts += 1
           throw NSError(
-            domain: "HTTP", code: 429,
+            domain: "com.google.firebase.firebaseai.BackendError", code: 429,
             userInfo: [NSLocalizedDescriptionKey: "RESOURCE_EXHAUSTED: Please retry in 90s."])
         }
         preconditionFailure("Quota errors must reach the caller")
@@ -58,7 +58,7 @@ struct AIRequestCoordinatorTests {
         _ = try await daily.perform {
           dailyAttempts += 1
           throw NSError(
-            domain: "HTTP", code: 429,
+            domain: "com.google.firebase.firebaseai.BackendError", code: 429,
             userInfo: [
               NSLocalizedDescriptionKey: "RESOURCE_EXHAUSTED GenerateRequestsPerDayPerProject"
             ])
@@ -75,7 +75,8 @@ struct AIRequestCoordinatorTests {
       attempts += 1
       if attempts < 3 {
         throw NSError(
-          domain: "HTTP", code: 503, userInfo: [NSLocalizedDescriptionKey: "503 UNAVAILABLE"])
+          domain: "com.google.firebase.firebaseai.BackendError", code: 503,
+          userInfo: [NSLocalizedDescriptionKey: "503 UNAVAILABLE"])
       }
       return "recovered"
     }
@@ -85,7 +86,8 @@ struct AIRequestCoordinatorTests {
       _ = try await transient.perform {
         attempts += 1
         throw NSError(
-          domain: "HTTP", code: 503, userInfo: [NSLocalizedDescriptionKey: "503 UNAVAILABLE"])
+          domain: "com.google.firebase.firebaseai.BackendError", code: 503,
+          userInfo: [NSLocalizedDescriptionKey: "503 UNAVAILABLE"])
       }
       preconditionFailure("Retries must be bounded")
     } catch AIRequestFailure.temporary {}
@@ -97,12 +99,64 @@ struct AIRequestCoordinatorTests {
       _ = try await denied.perform {
         deniedAttempts += 1
         throw NSError(
-          domain: "HTTP", code: 403,
-          userInfo: [NSLocalizedDescriptionKey: "PERMISSION_DENIED: invalid App Check token"])
+          domain: "com.google.firebase.firebaseai.BackendError", code: 403,
+          userInfo: [NSLocalizedDescriptionKey: "PERMISSION_DENIED: API access is disabled"])
       }
       preconditionFailure("Access errors must reach the caller")
     } catch AIRequestFailure.accessDenied {}
     precondition(deniedAttempts == 1)
+
+    let invalidAppCheck = NSError(
+      domain: "com.google.firebase.firebaseai.BackendError", code: 401,
+      userInfo: [NSLocalizedDescriptionKey: "Firebase App Check token is invalid."])
+    guard case .appVerification = AIRequestFailure.classify(invalidAppCheck, now: clock.date) else {
+      preconditionFailure("App Check failures need their own message")
+    }
+    precondition(AIRequestFailure.canRefreshAppCheck(after: invalidAppCheck))
+    for status in [400, 403, 429, 503] {
+      let failure = NSError(
+        domain: "com.google.firebase.firebaseai.BackendError", code: status,
+        userInfo: [NSLocalizedDescriptionKey: "Firebase App Check token is invalid."])
+      precondition(!AIRequestFailure.canRefreshAppCheck(after: failure))
+    }
+    let wrongDomain = NSError(
+      domain: "OtherService", code: 401,
+      userInfo: [NSLocalizedDescriptionKey: "Firebase App Check token is invalid."])
+    precondition(!AIRequestFailure.canRefreshAppCheck(after: wrongDomain))
+    let userAuth = NSError(
+      domain: "com.google.firebase.firebaseai.BackendError", code: 401,
+      userInfo: [NSLocalizedDescriptionKey: "User access token is invalid. Request ID 429503400."])
+    precondition(!AIRequestFailure.canRefreshAppCheck(after: userAuth))
+    guard case .accessDenied = AIRequestFailure.classify(userAuth, now: clock.date) else {
+      preconditionFailure("A numeric request ID must not change an authentication error")
+    }
+    let permission = NSError(
+      domain: "com.google.firebase.firebaseai.BackendError", code: 403,
+      userInfo: [NSLocalizedDescriptionKey: "Permission denied for project 429503400."])
+    guard case .accessDenied = AIRequestFailure.classify(permission, now: clock.date) else {
+      preconditionFailure("A numeric project ID must not be treated as quota exhaustion")
+    }
+    let invalidArgument = NSError(
+      domain: "com.google.firebase.firebaseai.BackendError", code: 400,
+      userInfo: [NSLocalizedDescriptionKey: "Invalid model request 429503401."])
+    guard case .configuration = AIRequestFailure.classify(invalidArgument, now: clock.date) else {
+      preconditionFailure("The HTTP status must determine configuration failures")
+    }
+    let unrelated = NSError(
+      domain: "OtherService", code: 429,
+      userInfo: [NSLocalizedDescriptionKey: "Request ID 400401429503 failed."])
+    guard case .other = AIRequestFailure.classify(unrelated, now: clock.date) else {
+      preconditionFailure("Unrelated numeric errors must not become HTTP failures")
+    }
+    var verificationAttempts = 0
+    do {
+      _ = try await denied.perform {
+        verificationAttempts += 1
+        throw invalidAppCheck
+      }
+      preconditionFailure("App verification must reach the recovery handler")
+    } catch AIRequestFailure.appVerification {}
+    precondition(verificationAttempts == 1)
 
     let offline = AIRequestFailure.classify(URLError(.notConnectedToInternet), now: clock.date)
     guard case .offline = offline else { preconditionFailure("Offline must be actionable") }
@@ -145,7 +199,7 @@ struct AIRequestCoordinatorTests {
       preconditionFailure("Cancellation must propagate")
     } catch is CancellationError {}
     print(
-      "PASS: pacing, quota cooldown and resume, daily quota, bounded retries, access errors, offline errors, serialization, cancellation"
+      "PASS: pacing, quota cooldown and resume, daily quota, bounded retries, access errors, App Check recovery eligibility, exact HTTP classification, offline errors, serialization, cancellation"
     )
   }
 }

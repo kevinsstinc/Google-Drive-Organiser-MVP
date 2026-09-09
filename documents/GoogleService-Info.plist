@@ -9,7 +9,7 @@
 	<key>PLIST_VERSION</key>
 	<string>1</string>
 	<key>BUNDLE_ID</key>
-	<string>com.kevinfredric.documents</string>
+	<string>com.kevinfredric.documents.2026</string>
 	<key>PROJECT_ID</key>
 	<string>documents-15ccc</string>
 	<key>STORAGE_BUCKET</key>
@@ -25,6 +25,6 @@
 	<key>IS_SIGNIN_ENABLED</key>
 	<true></true>
 	<key>GOOGLE_APP_ID</key>
-	<string>1:768067356104:ios:f5fe326fb77954d7d8acfd</string>
+	<string>1:768067356104:ios:c439499a45d6cccbd8acfd</string>
 </dict>
 </plist>

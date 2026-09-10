@@ -48,6 +48,8 @@ final class DriveLibraryController: ObservableObject {
 
   @Published var statusMessage: String?
 
+  @Published var errorMessage: String?
+
   private static let logger = Logger(
     subsystem: Bundle.main.bundleIdentifier ?? "Documents", category: "Library")
 
@@ -94,11 +96,13 @@ final class DriveLibraryController: ObservableObject {
     prepareAccount(accountID)
     let operationID = UUID()
     activeOperationID = operationID
+    errorMessage = nil
     defer { finishOperation(operationID) }
 
     guard user.grantedScopes?.contains(Self.driveReadScope) == true else {
       statusMessage =
         "Drive read access is needed. Sign out and sign in again to allow file-content access."
+      errorMessage = statusMessage
       return
     }
 
@@ -121,6 +125,7 @@ final class DriveLibraryController: ObservableObject {
       guard activeOperationID == operationID else { return }
       statusMessage =
         (error as? AIRequestFailure)?.errorDescription ?? driveStatusMessage(for: error)
+      errorMessage = statusMessage
     }
   }
 
@@ -139,6 +144,7 @@ final class DriveLibraryController: ObservableObject {
     prepareAccount(accountID)
     let operationID = UUID()
     activeOperationID = operationID
+    errorMessage = nil
     defer { finishOperation(operationID) }
     statusMessage = nil
     renderLibrary()
@@ -150,6 +156,7 @@ final class DriveLibraryController: ObservableObject {
       guard activeOperationID == operationID else { return }
       statusMessage =
         (error as? AIRequestFailure)?.errorDescription ?? driveStatusMessage(for: error)
+      errorMessage = statusMessage
     }
   }
 
@@ -237,6 +244,7 @@ final class DriveLibraryController: ObservableObject {
     organizedCount = 0
     totalToOrganize = 0
     statusMessage = nil
+    errorMessage = nil
     loadDeveloperLibrary()
   }
 
@@ -1219,7 +1227,7 @@ final class DriveLibraryController: ObservableObject {
       let statusCode =
         (response as? HTTPURLResponse)?
         .statusCode ?? -1
-      throw LibraryError.driveHTTPStatus(statusCode)
+      throw LibraryError.response(statusCode: statusCode, data: data)
     }
 
     return data
@@ -1592,7 +1600,7 @@ final class DriveLibraryController: ObservableObject {
         let statusCode =
           (response as? HTTPURLResponse)?
           .statusCode ?? -1
-        throw LibraryError.driveHTTPStatus(statusCode)
+        throw LibraryError.response(statusCode: statusCode, data: data)
       }
 
       let page = try JSONDecoder().decode(
@@ -2028,6 +2036,8 @@ final class DriveLibraryController: ObservableObject {
     }
 
     switch libraryError {
+    case .driveRateLimited:
+      return "Google Drive is limiting requests. Your progress is saved. Try again shortly."
     case .driveHTTPStatus(401):
       return "Drive access expired. Sign in again."
     case .driveHTTPStatus(403):
@@ -2213,6 +2223,25 @@ private struct FilePresentation {
 private enum LibraryError: Error {
   case invalidDriveURL
   case driveHTTPStatus(Int)
+  case driveRateLimited
   case missingGoogleUser
   case fileTooLarge(Int)
+
+  static func response(statusCode: Int, data: Data) -> LibraryError {
+    if statusCode == 429 {
+      return .driveRateLimited
+    }
+    if statusCode == 403,
+      let body = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+      let error = body["error"] as? [String: Any],
+      let details = error["errors"] as? [[String: Any]],
+      details.contains(where: {
+        let reason = $0["reason"] as? String
+        return reason == "rateLimitExceeded" || reason == "userRateLimitExceeded"
+      })
+    {
+      return .driveRateLimited
+    }
+    return .driveHTTPStatus(statusCode)
+  }
 }

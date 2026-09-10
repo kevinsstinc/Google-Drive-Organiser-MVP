@@ -179,6 +179,22 @@ struct TabBar: View {
 
         .tabViewStyle(.automatic)
 
+        .alert(
+            "Couldn’t organise files",
+            isPresented: Binding(
+                get: { library.errorMessage != nil },
+                set: { if !$0 { library.errorMessage = nil } }
+            ),
+            presenting: library.errorMessage
+        ) { _ in
+            Button("Retry") {
+                Task { await library.synchronize() }
+            }
+            Button("Not Now", role: .cancel) { }
+        } message: { message in
+            Text(message)
+        }
+
         .task {
 
             await library.synchronize()

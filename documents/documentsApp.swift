@@ -12,7 +12,7 @@ import SwiftUI
 @main
 struct documentsApp: App {
   init() {
-    #if DEBUG
+    #if targetEnvironment(simulator)
       AppCheck.setAppCheckProviderFactory(
         AppCheckDebugProviderFactory()
       )
